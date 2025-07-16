@@ -1,126 +1,146 @@
-# Project Chronos: A Cross-Chain Bridge Event Listener Simulation
+# Project Chronos: Cross-Chain Bridge Oracle Simulation
 
-This repository contains a Python-based simulation of a critical backend component for a cross-chain asset bridge. It acts as a highly reliable event listener that monitors a 'source' blockchain for specific events (e.g., asset deposits) and triggers corresponding actions on a 'destination' blockchain (e.g., minting a wrapped asset).
-
-The script is designed with production-grade architectural principles in mind, including state persistence, resilience to blockchain re-organizations (reorgs), and robust error handling.
+This repository contains a Python-based simulation of an off-chain oracle/validator component for a cross-chain asset bridge. The script demonstrates the architectural patterns and logic required to monitor events on a source blockchain and trigger corresponding actions on a destination blockchain.
 
 ## Concept
 
-The core concept is to bridge assets between two blockchains (Chain A and Chain B). The process is as follows:
+A cross-chain bridge allows users to transfer assets from one blockchain (e.g., Ethereum) to another (e.g., Polygon). A common mechanism is the "lock-and-mint" model:
 
-1.  A user deposits an asset (e.g., ETH or an ERC20 token) into a Bridge Contract on Chain A.
-2.  This action emits a `DepositMade` event, which includes details like the recipient's address on Chain B and the amount deposited.
-3.  The **Project Chronos** listener, running on a secure server, is constantly scanning Chain A for these `DepositMade` events.
-4.  Upon detecting a new, confirmed event, the listener's an authorized account (a 'Signer') to call a Mint Controller contract on Chain B.
-5.  This call on Chain B mints a corresponding amount of a wrapped/pegged asset (e.g., `wETH`) and sends it to the user's specified recipient address.
+1.  **Lock**: A user locks their assets (e.g., WETH) in a smart contract on the source chain.
+2.  **Event Emission**: The smart contract emits an event (`TokensLocked`) containing details of the deposit.
+3.  **Oracle Validation**: Off-chain services, known as oracles or relayers, listen for this event. They verify its authenticity and validity (e.g., check the amount, prevent replay attacks).
+4.  **Mint**: Upon successful validation, the oracle submits a signed transaction to a smart contract on the destination chain.
+5.  **Wrapped Asset Creation**: This destination contract mints a corresponding "wrapped" asset (e.g., pWETH) and sends it to the user's address on the new chain.
 
-This script simulates steps 3, 4, and 5, providing a robust framework for event detection and transaction orchestration.
+**Project Chronos simulates the critical off-chain component (steps 3 and 4) of this system.**
 
 ## Code Architecture
 
-The system is designed with a clear separation of concerns, implemented across several Python classes:
+The script is designed with a modular, object-oriented approach to separate concerns and enhance maintainability.
 
--   **`Config`**: A static class that loads and holds all necessary configuration from environment variables (`.env` file). This includes RPC URLs, contract addresses, and private keys, keeping sensitive data out of the codebase.
+```
++-----------------------+
+|      BridgeOracle     | (Main Orchestrator)
++-----------+-----------+
+            |
+            | 1. Starts & manages the loop
+            | 5. Updates & persists state
+            v
+.-----------+-------------------------------------------------------------.
+|           |                            |                                |
+|           v                            v                                v
+| +------------------------+   +----------------------+   +-------------------------+ |
+| |BridgeContractEventHandler|   | TransactionValidator |   | DestinationChainMinter  | |
+| +------------------------+   +----------------------+   +-------------------------+ |
+| | - Scans block ranges   |   | - Checks for replays |   | - Builds mint tx        | |
+| | - Fetches event logs   |   | - Validates amounts  |   | - Signs tx (simulated)  | |
+| |                        |   | - Checks token       |   | - Submits tx (simulated)| |
+| '-----------+------------'   '----------+-----------'   '------------+------------' |
+|             |                          |                              |
+|             v                          |                              |
+| +------------------------+             |                              v
+| |   BlockchainConnector  | <-----------+----------------> +------------------------+ |
+| |    (Source Chain)      |                                |   BlockchainConnector  | |
+| +------------------------+                                +------------------------+ |
+| | - Connects to RPC      |                                |    (Destination Chain)  | |
+| | - Provides web3 obj    |                                '------------------------' |
+| '------------------------'                                                             |
+'---------------------------------------------------------------------------------------'
+```
 
--   **`BlockchainConnector`**: This class is the sole interface to the blockchain nodes. It encapsulates all `web3.py` logic for connecting to a node, creating contract instances, and fetching block information. It can be instantiated separately for the source and destination chains.
+-   **`BlockchainConnector`**: A reusable class that manages the connection to a specific blockchain's RPC endpoint using `web3.py`. It provides a `Web3` instance and a helper to get contract objects.
 
--   **`TransactionProcessor`**: This is the 'business logic' component. It takes a confirmed event from the source chain and performs the necessary actions on the destination chain. In this simulation, it builds, signs, and *simulates* the sending of a minting transaction. It includes logic for estimating gas prices and preventing duplicate processing.
+-   **`BridgeContractEventHandler`**: Responsible for scanning block ranges on the source chain, filtering for the specific `TokensLocked` event, and returning the decoded event data.
 
--   **`BridgeEventListener`**: This is the main orchestrator and the heart of the application. It manages the primary loop, which involves:
-    -   Determining the correct range of blocks to scan.
-    -   Using the `BlockchainConnector` to query for new events.
-    -   Passing any new, confirmed events to the `TransactionProcessor`.
-    -   Managing state (i.e., the last block number processed) by saving it to a local JSON file (`bridge_listener_state.json`) to ensure continuity between restarts.
+-   **`TransactionValidator`**: Performs crucial security and business logic checks on the fetched event data. This includes preventing replay attacks by tracking transaction IDs and validating the transaction value against configured limits using an external `requests` call to a price oracle API (CoinGecko).
+
+-   **`DestinationChainMinter`**: Simulates the final step. Once an event is validated, this class constructs, signs, and (in this simulation) logs the details of the transaction that would be sent to the destination chain to mint the wrapped assets.
+
+-   **`BridgeOracle`**: The main class that orchestrates the entire workflow. It initializes all other components, manages the main processing loop, handles state (e.g., the last block number processed), and ensures continuous operation.
 
 ## How it Works
 
-The listener operates in a continuous loop, following these steps:
+The script executes a continuous loop with the following steps:
 
-1.  **Initialization**: On startup, the listener loads its configuration and reads the `bridge_listener_state.json` file to determine the last block it successfully processed. If the file doesn't exist, it prepares to start from the current block.
+1.  **State Initialization**: The `BridgeOracle` loads its state from a local file (`oracle_state.json`), which contains the last block number it successfully processed. If the file doesn't exist, it starts from a pre-configured `start_block`.
 
-2.  **Fetch Latest Block**: It queries the source chain's RPC node to get the current latest block number.
+2.  **Block Range Calculation**: It determines the range of blocks to scan on the source chain, from the `last_processed_block + 1` up to the current latest block, processing in manageable chunks (`block_chunk_size`).
 
-3.  **Apply Confirmation Delay**: To protect against blockchain reorgs, it does not process events from the most recent blocks. It subtracts a `CONFIRMATION_BLOCKS` value (e.g., 12) from the latest block number. Events are only considered 'final' once they are this many blocks deep.
+3.  **Event Fetching**: The `BridgeContractEventHandler` queries the source chain's RPC node for `TokensLocked` events within this calculated block range.
 
-4.  **Scan Block Range**: It identifies a range of blocks to scan, from `last_processed_block + 1` up to the `latest_block - CONFIRMATION_BLOCKS`.
+4.  **Event Processing Loop**: For each event found:
+    a. The event data is passed to the `TransactionValidator`.
+    b. The validator checks if the transaction ID has been seen before. It then fetches the token's current price via a `requests` call and verifies that the transaction value is within the acceptable minimum and maximum limits.
+    c. If validation is successful, the event data is passed to the `DestinationChainMinter`.
+    d. The `DestinationChainMinter` simulates the creation and signing of a `mintWrappedTokens` transaction. It logs the details of what would be sent to the destination chain.
+    e. If validation fails, the event is logged and skipped.
 
-5.  **Filter for Events**: It uses the `web3.py` library to efficiently filter this block range for any `DepositMade` events emitted by the source bridge contract.
+5.  **State Update**: After scanning the block range, the `BridgeOracle` updates its state with the last block number it scanned and saves it to `oracle_state.json`.
 
-6.  **Process Events**: If events are found, it iterates through each one and passes it to the `TransactionProcessor`.
-
-7.  **Simulate Minting**: The `TransactionProcessor` builds and signs a `mintBridgedTokens` transaction for the destination chain. It logs the details of this simulated transaction, including its potential hash.
-
-8.  **Update and Persist State**: After successfully scanning the block range, the listener updates its `last_processed_block` variable to the end of that range and writes this new value to `bridge_listener_state.json`.
-
-9.  **Wait**: The listener then sleeps for a configured `POLL_INTERVAL_SECONDS` before starting the loop again from step 2.
+6.  **Wait**: The script waits for a configured interval (`poll_interval_seconds`) before starting the next cycle, preventing RPC rate-limiting and unnecessary resource consumption.
 
 ## Usage Example
 
-Follow these steps to run the simulation.
+**1. Prerequisites**
 
-1.  **Clone the repository:**
-    ```bash
-    git clone <repository-url>
-    cd project-chronos
-    ```
+-   Python 3.8+
+-   Access to RPC URLs for a source and destination blockchain (e.g., from Alchemy, Infura, or a local node). For this example, you can use Sepolia (source) and Mumbai (destination).
 
-2.  **Create a virtual environment:**
-    ```bash
-    python -m venv venv
-    source venv/bin/activate  # On Windows, use `venv\Scripts\activate`
-    ```
+**2. Installation**
 
-3.  **Install dependencies:**
-    ```bash
-    pip install -r requirements.txt
-    ```
+Clone the repository and install the required dependencies:
 
-4.  **Create a configuration file:**
-    Create a file named `.env` in the root of the project and populate it with the required details. You will need RPC URLs (e.g., from Infura or Alchemy) and dummy addresses/keys for the simulation.
+```bash
+git clone https://github.com/your-username/project-chronos.git
+cd project-chronos
+pip install -r requirements.txt
+```
 
-    ```dotenv
-    # .env file
-    
-    # Source Chain (e.g., Ethereum Mainnet or a Testnet like Sepolia)
-    SOURCE_CHAIN_RPC_URL="https://sepolia.infura.io/v3/YOUR_INFURA_PROJECT_ID"
-    SOURCE_CHAIN_BRIDGE_CONTRACT_ADDRESS="0x........................................"
-    
-    # Destination Chain (e.g., Polygon Mainnet or a Testnet like Mumbai)
-    DESTINATION_CHAIN_RPC_URL="https://polygon-mumbai.infura.io/v3/YOUR_INFURA_PROJECT_ID"
-    DESTINATION_CHAIN_MINT_CONTROLLER_ADDRESS="0x........................................"
-    
-    # Private key for the account that will sign the minting transactions on the destination chain
-    # IMPORTANT: Use a key from a test/burner wallet for this simulation. DO NOT USE A REAL KEY WITH ASSETS.
-    SIGNER_PRIVATE_KEY="0x.............................................................."
-    
-    # --- Optional Settings ---
-    # Number of blocks to wait for confirmation
-    CONFIRMATION_BLOCKS=12
-    # How often to check for new blocks (in seconds)
-    POLL_INTERVAL_SECONDS=15
-    # External API for gas price fallback (example for Polygon)
-    GAS_STATION_API_URL="https://api.polygonscan.com/api?module=gastracker&action=gasoracle&apikey=YOUR_POLYGONSCAN_API_KEY"
-    ```
+**3. Configuration**
 
-5.  **Run the script:**
-    ```bash
-    python script.py
-    ```
+Create a `.env` file in the root of the project and add your configuration details. This file is ignored by git to protect your sensitive keys.
 
-6.  **Observe the output:**
-    The console will show logs detailing the listener's activity, such as the blocks it is scanning, any events it finds, and the steps of the simulated minting process.
+```dotenv
+# .env
 
-    ```
-    2023-10-27 15:30:00 - INFO - [script.main] - --- Cross-Chain Bridge Event Listener Started ---
-    2023-10-27 15:30:00 - INFO - [script.BridgeEventListener] - Watching for 'DepositMade' events on contract: 0x...
-    2023-10-27 15:30:02 - INFO - [script.BridgeEventListener] - Scanning for events from block 4500124 to 4500150...
-    2023-10-27 15:30:05 - INFO - [script.BridgeEventListener] - Found 1 new 'DepositMade' event(s).
-    2023-10-27 15:30:05 - INFO - [script.TransactionProcessor] - Processing new deposit event: 0x...-12
-    2023-10-27 15:30:05 - INFO - [script.TransactionProcessor] -   -> Recipient: 0x..., Amount: 1000000000000000000
-    2023-10-27 15:30:05 - INFO - [script.TransactionProcessor] - Simulating mint transaction on destination chain...
-    2023-10-27 15:30:06 - INFO - [script.TransactionProcessor] -   -> [SIMULATED] Transaction sent. Hash: 0x...
-    2023-10-27 15:30:06 - INFO - [script.TransactionProcessor] -   -> [SIMULATED] Waiting for confirmation...
-    2023-10-27 15:30:08 - INFO - [script.TransactionProcessor] -   -> [SUCCESS] Mint for event 0x...-12 confirmed on destination chain.
-    2023-10-27 15:30:10 - INFO - [script.BridgeEventListener] - Scanning for events from block 4500151 to 4500165...
-    2023-10-27 15:30:12 - INFO - [script.BridgeEventListener] - No new events found in this range.
-    ```
+# RPC URL for the source chain (e.g., Ethereum Sepolia)
+SOURCE_CHAIN_RPC_URL="https://eth-sepolia.g.alchemy.com/v2/YOUR_API_KEY"
+
+# RPC URL for the destination chain (e.g., Polygon Mumbai)
+DESTINATION_CHAIN_RPC_URL="https://polygon-mumbai.g.alchemy.com/v2/YOUR_API_KEY"
+
+# Private key of the oracle's wallet. IMPORTANT: Use a dedicated, firewalled key with limited funds.
+# This should start with 0x.
+ORACLE_PRIVATE_KEY="0xyour_oracle_private_key_here"
+```
+
+**4. Running the Script**
+
+Execute the main script from your terminal:
+
+```bash
+python oracle_simulation.py
+```
+
+**5. Sample Output**
+
+The script will start logging its operations to the console. When it finds and processes an event, the output will look similar to this:
+
+```
+2023-10-27 14:30:10 - [INFO] - BridgeOracle - --- Project Chronos Oracle starting up ---
+2023-10-27 14:30:11 - [INFO] - BlockchainConnector[Ethereum-Sepolia] - Successfully connected to Ethereum-Sepolia. Chain ID: 11155111
+2023-10-27 14:30:12 - [INFO] - BlockchainConnector[Polygon-Mumbai] - Successfully connected to Polygon-Mumbai. Chain ID: 80001
+2023-10-27 14:30:12 - [INFO] - Minter[Polygon-Mumbai] - Minter initialized for account: 0xYourOracleWalletAddress
+2023-10-27 14:30:12 - [INFO] - BridgeOracle - Loaded state from oracle_state.json: {'last_processed_block': 19000000}
+2023-10-27 14:30:15 - [INFO] - BridgeOracle - Scanning for events from block 19000001 to 19000100...
+2023-10-27 14:30:18 - [INFO] - EventHandler[Ethereum-Sepolia] - Found 1 'TokensLocked' event(s) between blocks 19000001-19000100.
+2023-10-27 14:30:18 - [INFO] - BridgeOracle - Processing event from transaction: 0x123abc...def456
+2023-10-27 14:30:18 - [INFO] - TransactionValidator - Validating transaction ID: 0xabc...def
+2023-10-27 14:30:19 - [INFO] - TransactionValidator - Transaction abc...def details: 0.5 WETH (~$950.45)
+2023-10-27 14:30:19 - [INFO] - TransactionValidator - Transaction abc...def passed all validation checks.
+2023-10-27 14:30:19 - [INFO] - Minter[Polygon-Mumbai] - Preparing to mint 0.5 tokens for 0xSenderAddress on Polygon-Mumbai.
+2023-10-27 14:30:20 - [INFO] - Minter[Polygon-Mumbai] - [SIMULATION] Transaction to mint tokens would be sent now.
+2023-10-27 14:30:20 - [INFO] - Minter[Polygon-Mumbai] - [SIMULATION]   - To: 0x000000000000000000000000000000000000dEaD
+2023-10-27 14:30:20 - [INFO] - Minter[Polygon-Mumbai] - [SIMULATION]   - Function: mintWrappedTokens(recipient=0xSenderAddress, amount=500000000000000000, sourceTransactionId=0xabc...def)
+2023-10-27 14:30:20 - [INFO] - Minter[Polygon-Mumbai] - [SIMULATION]   - Signed TX Hash (raw): 0x789ghi...jkl789
+```
