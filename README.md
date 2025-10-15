@@ -10,7 +10,7 @@ A cross-chain bridge allows users to transfer assets from one blockchain (e.g., 
 2.  **Event Emission**: The smart contract emits an event (`TokensLocked`) containing details of the deposit.
 3.  **Oracle Validation**: Off-chain services, known as oracles or relayers, listen for this event. They verify its authenticity and validity (e.g., check the amount, prevent replay attacks).
 4.  **Mint**: Upon successful validation, the oracle submits a signed transaction to a smart contract on the destination chain.
-5.  **Wrapped Asset Creation**: This destination contract mints a corresponding "wrapped" asset (e.g., pWETH) and sends it to the user's address on the new chain.
+5.  **Wrapped Asset Creation**: The destination contract mints a corresponding "wrapped" asset (e.g., pWETH) and sends it to the user's address on the new chain.
 
 **Project Chronos simulates the critical off-chain component (steps 3 and 4) of this system.**
 
@@ -48,11 +48,11 @@ The script is designed with a modular, object-oriented approach to separate conc
 '---------------------------------------------------------------------------------------'
 ```
 
--   **`BlockchainConnector`**: A reusable class that manages the connection to a specific blockchain's RPC endpoint using `web3.py`. It provides a `Web3` instance and a helper to get contract objects.
+-   **`BlockchainConnector`**: A reusable class that manages the connection to a blockchain's RPC endpoint using `web3.py`. It provides a `Web3` instance and helpers to get contract objects.
 
--   **`BridgeContractEventHandler`**: Responsible for scanning block ranges on the source chain, filtering for the specific `TokensLocked` event, and returning the decoded event data.
+-   **`BridgeContractEventHandler`**: Responsible for scanning block ranges on the source chain, filtering for the `TokensLocked` event, and returning the decoded event data.
 
--   **`TransactionValidator`**: Performs crucial security and business logic checks on the fetched event data. This includes preventing replay attacks by tracking transaction IDs and validating the transaction value against configured limits using an external `requests` call to a price oracle API (CoinGecko).
+-   **`TransactionValidator`**: Performs crucial security and business logic checks on fetched event data. This includes preventing replay attacks by tracking transaction IDs and validating the transaction value against configured limits using an external `requests` call to a price oracle API (e.g., CoinGecko).
 
 -   **`DestinationChainMinter`**: Simulates the final step. Once an event is validated, this class constructs, signs, and (in this simulation) logs the details of the transaction that would be sent to the destination chain to mint the wrapped assets.
 
@@ -64,29 +64,29 @@ The script executes a continuous loop with the following steps:
 
 1.  **State Initialization**: The `BridgeOracle` loads its state from a local file (`oracle_state.json`), which contains the last block number it successfully processed. If the file doesn't exist, it starts from a pre-configured `start_block`.
 
-2.  **Block Range Calculation**: It determines the range of blocks to scan on the source chain, from the `last_processed_block + 1` up to the current latest block, processing in manageable chunks (`block_chunk_size`).
+2.  **Block Range Calculation**: It determines the range of blocks to scan on the source chain, from `last_processed_block + 1` up to the current latest block, processing in manageable chunks (`block_chunk_size`).
 
-3.  **Event Fetching**: The `BridgeContractEventHandler` queries the source chain's RPC node for `TokensLocked` events within this calculated block range.
+3.  **Event Fetching**: The `BridgeContractEventHandler` queries the source chain's RPC node for `TokensLocked` events within the calculated block range.
 
 4.  **Event Processing Loop**: For each event found:
     a. The event data is passed to the `TransactionValidator`.
-    b. The validator checks if the transaction ID has been seen before. It then fetches the token's current price via a `requests` call and verifies that the transaction value is within the acceptable minimum and maximum limits.
+    b. The validator checks if the transaction ID has been seen before. It then fetches the token's current price and verifies that the transaction value is within acceptable minimum and maximum limits.
     c. If validation is successful, the event data is passed to the `DestinationChainMinter`.
-    d. The `DestinationChainMinter` simulates the creation and signing of a `mintWrappedTokens` transaction. It logs the details of what would be sent to the destination chain.
+    d. The `DestinationChainMinter` simulates the creation and signing of a `mintWrappedTokens` transaction, logging the details of what would be sent to the destination chain.
     e. If validation fails, the event is logged and skipped.
 
-5.  **State Update**: After scanning the block range, the `BridgeOracle` updates its state with the last block number it scanned and saves it to `oracle_state.json`.
+5.  **State Update**: After processing the block range, the `BridgeOracle` updates its state with the last block number it scanned and saves it to `oracle_state.json` to ensure continuity.
 
 6.  **Wait**: The script waits for a configured interval (`poll_interval_seconds`) before starting the next cycle, preventing RPC rate-limiting and unnecessary resource consumption.
 
-## Usage Example
+## Usage
 
-**1. Prerequisites**
+### 1. Prerequisites
 
 -   Python 3.8+
--   Access to RPC URLs for a source and destination blockchain (e.g., from Alchemy, Infura, or a local node). For this example, you can use Sepolia (source) and Mumbai (destination).
+-   Access to source and destination blockchain RPC URLs (e.g., from Alchemy, Infura, or a local node). The simulation is configured for Sepolia (source) and Mumbai (destination).
 
-**2. Installation**
+### 2. Installation
 
 Clone the repository and install the required dependencies:
 
@@ -96,25 +96,25 @@ cd project-chronos
 pip install -r requirements.txt
 ```
 
-**3. Configuration**
+### 3. Configuration
 
-Create a `.env` file in the root of the project and add your configuration details. This file is ignored by git to protect your sensitive keys.
+Create a `.env` file in the project's root directory. This file is git-ignored to protect your secrets. Copy the following template and fill in your values:
 
 ```dotenv
-# .env
+# .env.example
 
 # RPC URL for the source chain (e.g., Ethereum Sepolia)
-SOURCE_CHAIN_RPC_URL="https://eth-sepolia.g.alchemy.com/v2/YOUR_API_KEY"
+SOURCE_CHAIN_RPC_URL="https://eth-sepolia.g.alchemy.com/v2/YOUR_ALCHEMY_API_KEY"
 
 # RPC URL for the destination chain (e.g., Polygon Mumbai)
-DESTINATION_CHAIN_RPC_URL="https://polygon-mumbai.g.alchemy.com/v2/YOUR_API_KEY"
+DESTINATION_CHAIN_RPC_URL="https://polygon-mumbai.g.alchemy.com/v2/YOUR_ALCHEMY_API_KEY"
 
-# Private key of the oracle's wallet. IMPORTANT: Use a dedicated, firewalled key with limited funds.
-# This should start with 0x.
-ORACLE_PRIVATE_KEY="0xyour_oracle_private_key_here"
+# Private key of the oracle's wallet. Must start with 0x.
+# WARNING: Use a dedicated key with limited funds, especially for development.
+ORACLE_PRIVATE_KEY="0x..."
 ```
 
-**4. Running the Script**
+### 4. Running the Script
 
 Execute the main script from your terminal:
 
@@ -122,7 +122,7 @@ Execute the main script from your terminal:
 python oracle_simulation.py
 ```
 
-**5. Sample Output**
+### 5. Sample Output
 
 The script will start logging its operations to the console. When it finds and processes an event, the output will look similar to this:
 
