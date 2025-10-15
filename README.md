@@ -1,10 +1,10 @@
 # Project Chronos: Cross-Chain Bridge Oracle Simulation
 
-This repository contains a Python-based simulation of an off-chain oracle/validator component for a cross-chain asset bridge. The script demonstrates the architectural patterns and logic required to monitor events on a source blockchain and trigger corresponding actions on a destination blockchain.
+This repository contains a Python-based simulation of an off-chain oracle/validator component for a cross-chain asset bridge. It demonstrates the architectural patterns and logic for monitoring events on a source blockchain (e.g., Ethereum) and triggering corresponding actions on a destination blockchain (e.g., Polygon).
 
 ## Concept
 
-A cross-chain bridge allows users to transfer assets from one blockchain (e.g., Ethereum) to another (e.g., Polygon). A common mechanism is the "lock-and-mint" model:
+A cross-chain bridge allows users to transfer assets from one blockchain to another. A common mechanism is the "lock-and-mint" model:
 
 1.  **Lock**: A user locks their assets (e.g., WETH) in a smart contract on the source chain.
 2.  **Event Emission**: The smart contract emits an event (`TokensLocked`) containing details of the deposit.
@@ -50,9 +50,9 @@ The script is designed with a modular, object-oriented approach to separate conc
 
 -   **`BlockchainConnector`**: A reusable class that manages the connection to a blockchain's RPC endpoint using `web3.py`. It provides a `Web3` instance and helpers to get contract objects.
 
--   **`BridgeContractEventHandler`**: Responsible for scanning block ranges on the source chain, filtering for the `TokensLocked` event, and returning the decoded event data.
+-   **`BridgeContractEventHandler`**: Responsible for scanning block ranges on the source chain, filtering for the `TokensLocked` event, and returning decoded event data.
 
--   **`TransactionValidator`**: Performs crucial security and business logic checks on fetched event data. This includes preventing replay attacks by tracking transaction IDs and validating the transaction value against configured limits using an external `requests` call to a price oracle API (e.g., CoinGecko).
+-   **`TransactionValidator`**: Performs crucial security and business logic checks on fetched event data. This includes preventing replay attacks by tracking processed transaction IDs and validating the transaction value against configured limits using an external `requests` call to a price oracle API (e.g., CoinGecko).
 
 -   **`DestinationChainMinter`**: Simulates the final step. Once an event is validated, this class constructs, signs, and (in this simulation) logs the details of the transaction that would be sent to the destination chain to mint the wrapped assets.
 
@@ -70,7 +70,7 @@ The script executes a continuous loop with the following steps:
 
 4.  **Event Processing Loop**: For each event found:
     a. The event data is passed to the `TransactionValidator`.
-    b. The validator checks if the transaction ID has been seen before. It then fetches the token's current price and verifies that the transaction value is within acceptable minimum and maximum limits.
+    b. The validator checks if the transaction ID has been seen before (to prevent replays). It then fetches the token's current price and verifies that the transaction value is within acceptable minimum and maximum limits.
     c. If validation is successful, the event data is passed to the `DestinationChainMinter`.
     d. The `DestinationChainMinter` simulates the creation and signing of a `mintWrappedTokens` transaction, logging the details of what would be sent to the destination chain.
     e. If validation fails, the event is logged and skipped.
@@ -84,21 +84,28 @@ The script executes a continuous loop with the following steps:
 ### 1. Prerequisites
 
 -   Python 3.8+
--   Access to source and destination blockchain RPC URLs (e.g., from Alchemy, Infura, or a local node). The simulation is configured for Sepolia (source) and Mumbai (destination).
+-   Access to source and destination blockchain RPC URLs (e.g., from Alchemy, Infura, or a local node). The simulation is configured for the Sepolia (source) and Mumbai (destination) testnets.
 
 ### 2. Installation
 
-Clone the repository and install the required dependencies:
+Clone the repository, create a virtual environment, and install the required dependencies:
 
 ```bash
+# Clone the repository
 git clone https://github.com/your-username/project-chronos.git
 cd project-chronos
+
+# Create and activate a virtual environment
+python -m venv venv
+source venv/bin/activate  # On Windows, use `venv\Scripts\activate`
+
+# Install dependencies
 pip install -r requirements.txt
 ```
 
 ### 3. Configuration
 
-Create a `.env` file in the project's root directory. This file is git-ignored to protect your secrets. Copy the following template and fill in your values:
+Create a `.env` file in the project's root directory. This file is included in `.gitignore` by default to protect your secrets. Copy the following template and fill in your values:
 
 ```dotenv
 # .env.example
