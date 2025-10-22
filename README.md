@@ -52,7 +52,7 @@ The script is designed with a modular, object-oriented approach to separate conc
 
 -   **`BridgeContractEventHandler`**: Responsible for scanning block ranges on the source chain, filtering for the `TokensLocked` event, and returning decoded event data.
 
--   **`TransactionValidator`**: Performs crucial security and business logic checks on fetched event data. This includes preventing replay attacks by tracking processed transaction IDs and validating the transaction value against configured limits using an external `requests` call to a price oracle API (e.g., CoinGecko).
+-   **`TransactionValidator`**: Performs crucial security and business logic checks on the fetched event data. It prevents replay attacks by tracking processed transaction IDs and validates the transaction value against configured limits by making an API call to a price oracle (e.g., CoinGecko).
 
 -   **`DestinationChainMinter`**: Simulates the final step. Once an event is validated, this class constructs, signs, and (in this simulation) logs the details of the transaction that would be sent to the destination chain to mint the wrapped assets.
 
@@ -108,7 +108,7 @@ pip install -r requirements.txt
 Create a `.env` file in the project's root directory. This file is included in `.gitignore` by default to protect your secrets. Copy the following template and fill in your values:
 
 ```dotenv
-# .env.example
+# .env
 
 # RPC URL for the source chain (e.g., Ethereum Sepolia)
 SOURCE_CHAIN_RPC_URL="https://eth-sepolia.g.alchemy.com/v2/YOUR_ALCHEMY_API_KEY"
@@ -116,7 +116,7 @@ SOURCE_CHAIN_RPC_URL="https://eth-sepolia.g.alchemy.com/v2/YOUR_ALCHEMY_API_KEY"
 # RPC URL for the destination chain (e.g., Polygon Mumbai)
 DESTINATION_CHAIN_RPC_URL="https://polygon-mumbai.g.alchemy.com/v2/YOUR_ALCHEMY_API_KEY"
 
-# Private key of the oracle's wallet. Must start with 0x.
+# Private key for the oracle's wallet. Must start with 0x.
 # WARNING: Use a dedicated key with limited funds, especially for development.
 ORACLE_PRIVATE_KEY="0x..."
 ```
@@ -127,6 +127,28 @@ Execute the main script from your terminal:
 
 ```bash
 python oracle_simulation.py
+```
+
+The script initializes and runs the main `BridgeOracle` loop, which continuously monitors the source chain. Here is a simplified view of the entrypoint in `oracle_simulation.py`:
+
+```python
+# oracle_simulation.py (simplified entrypoint)
+
+# ... import statements and class definitions ...
+
+def main():
+    """Initializes and runs the bridge oracle."""
+    # Load configuration from .env and other sources
+    config = load_configuration()
+
+    # Instantiate the main orchestrator
+    oracle = BridgeOracle(config=config)
+
+    # Start the continuous monitoring loop
+    oracle.run()
+
+if __name__ == "__main__":
+    main()
 ```
 
 ### 5. Sample Output
